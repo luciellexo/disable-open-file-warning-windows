@@ -1,0 +1,84 @@
+# Load necessary .NET assemblies for the GUI
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Function to check if the script is running as an administrator
+function Test-Admin {
+    $currentUser = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Function to elevate the script if not running as an administrator
+function Elevate-Process {
+    $newProcess = New-Object System.Diagnostics.ProcessStartInfo
+    $newProcess.FileName = $myinvocation.MyCommand.Definition
+    $newProcess.Verb = "runas"
+    $newProcess.Arguments = $myinvocation.UnboundArguments
+    [System.Diagnostics.Process]::Start($newProcess) | Out-Null
+    exit
+}
+
+# Check for administrator privileges and elevate if needed
+if (-not (Test-Admin)) {
+    Elevate-Process
+}
+
+# Define the registry path for the modification
+$registryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Attachments"
+
+# --- GUI Creation ---
+
+# Create the main form (window)
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Disable Security Warning"
+$form.Size = New-Object System.Drawing.Size(420, 220)
+$form.StartPosition = "CenterScreen"
+$form.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40) # Dark gray background
+$form.ForeColor = [System.Drawing.Color]::White # White text
+
+# Create a label for the warning message
+$label = New-Object System.Windows.Forms.Label
+$label.Text = "This script will disable the 'Open File - Security Warning' dialog. This may increase your security risk. Are you sure you want to proceed?"
+$label.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$label.MaximumSize = New-Object System.Drawing.Size(360, 0) # Allow text wrapping
+$label.AutoSize = $true
+$label.Location = New-Object System.Drawing.Point(20, 20)
+$label.ForeColor = [System.Drawing.Color]::White
+$form.Controls.Add($label)
+
+# Create a button to execute the action
+$button = New-Object System.Windows.Forms.Button
+$button.Text = "Disable Warning"
+$button.Size = New-Object System.Drawing.Size(150, 40)
+$button.Location = New-Object System.Drawing.Point(125, 120)
+$button.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60) # Slightly lighter gray
+$button.ForeColor = [System.Drawing.Color]::White
+$button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$button.FlatAppearance.BorderSize = 0
+$form.Controls.Add($button)
+
+# Define what happens when the button is clicked
+$button.Add_Click({
+    # Create the registry key if it does not exist
+    if (-not (Test-Path $registryPath)) {
+        New-Item -Path $registryPath -Force | Out-Null
+    }
+
+    # Set the registry value to disable the warning
+    Set-ItemProperty -Path $registryPath -Name "SaveZoneInformation" -Value 1 -Type DWORD
+
+    # Restart explorer.exe to apply the changes immediately
+    $explorerProcess = Get-Process -Name explorer -ErrorAction SilentlyContinue
+    if ($explorerProcess) {
+        Stop-Process -Name explorer -Force
+        Start-Process explorer.exe
+    }
+
+    # Inform the user of success and close the GUI
+    [System.Windows.Forms.MessageBox]::Show("The 'Open File - Security Warning' has been disabled. Explorer has been restarted to apply the changes.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    $form.Close()
+})
+
+# Show the form to the user
+$form.Add_Shown({$form.Activate()})
+[void]$form.ShowDialog()
